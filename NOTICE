@@ -1,0 +1,16 @@
+photo-xmp
+Copyright (c) 2026 f1shh
+
+The native subject-mask bridge links against the user's installed darktable
+library and derives its prompt/refinement and raster-to-vector flow in part from
+darktable 5.6.1 source code, especially src/develop/masks/object.c,
+src/common/ai/segmentation.*, and src/common/ras2vect.*.
+
+darktable is Copyright (C) the darktable contributors and is licensed under the
+GNU General Public License version 3 or later:
+https://github.com/darktable-org/darktable
+
+photo-xmp does not bundle darktable, ONNX Runtime, or trained model files. The
+user's installed darktable runtime, configuration, and models are used at run
+time. Modified bridge code is part of this repository and is distributed under
+GPL-3.0-or-later.
