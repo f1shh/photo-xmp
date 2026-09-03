@@ -103,9 +103,99 @@ def _json_dump(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=False))
 
 
+def _command_status(command: str, role: str, *, required: bool = False) -> dict[str, object]:
+    path = shutil.which(command)
+    return {
+        "available": path is not None,
+        "command": command,
+        "path": path,
+        "required_for_cli": required,
+        "role": role,
+    }
+
+
+def companion_tool_status() -> dict[str, object]:
+    """Report common photo-workflow tools without making them CLI blockers."""
+    tools = {
+        "uv": _command_status(
+            "uv", "isolated execution of skill helpers and their declared dependencies"
+        ),
+        "exiftool": _command_status(
+            "exiftool", "source metadata, orientation, and provenance inspection"
+        ),
+        "imagemagick": _command_status(
+            "magick", "contact sheets, overlays, and auxiliary image inspection"
+        ),
+        "fontconfig": _command_status(
+            "fc-match", "portable font discovery for annotated review artifacts"
+        ),
+        "gmic": _command_status(
+            "gmic", "optional external image operations when a workflow explicitly selects them"
+        ),
+    }
+
+    fc_list = shutil.which("fc-list")
+    cjk_font: dict[str, object] = {
+        "available": False,
+        "sample": None,
+        "role": "CJK-capable text in review boards and annotations",
+    }
+    if fc_list is not None:
+        try:
+            completed = subprocess.run(
+                [fc_list, ":lang=zh-cn", "family", "file"],
+                text=True, capture_output=True, timeout=5, check=False,
+            )
+            sample = next(
+                (line.strip() for line in completed.stdout.splitlines() if line.strip()),
+                None,
+            )
+            cjk_font.update({"available": sample is not None, "sample": sample})
+        except (OSError, subprocess.SubprocessError):
+            pass
+    tools["cjk_font"] = cjk_font
+
+    magick = shutil.which("magick")
+    registry: dict[str, object] = {
+        "available": False,
+        "font_count": 0,
+        "cjk_aliases": [],
+        "role": "ImageMagick named-font lookup for portable annotation commands",
+    }
+    if magick is not None:
+        try:
+            completed = subprocess.run(
+                [magick, "-list", "font"], text=True, capture_output=True,
+                timeout=10, check=False,
+            )
+            names = [
+                line.split(":", 1)[1].strip()
+                for line in completed.stdout.splitlines()
+                if line.lstrip().startswith("Font:")
+            ]
+            cjk_markers = (
+                "cjk", "source-han", "sourcehan", "noto-sans-sc",
+                "pingfang", "hiragino", "wenquanyi", "arial-unicode",
+            )
+            aliases = [
+                name for name in names
+                if any(marker in name.lower() for marker in cjk_markers)
+            ]
+            registry.update({
+                "available": bool(names),
+                "font_count": len(names),
+                "cjk_aliases": aliases[:12],
+            })
+        except (OSError, subprocess.SubprocessError):
+            pass
+    tools["imagemagick_font_registry"] = registry
+    return tools
+
+
 def doctor(
     executable: str = "darktable-cli", config_dir: Path | None = None
 ) -> dict[str, object]:
+    workflow_tools = companion_tool_status()
     try:
         version = check_darktable_version(executable)
         completed = subprocess.run(
@@ -116,6 +206,7 @@ def doctor(
         return {
             "status": "failed", "darktable_cli": executable,
             "error": str(exc),
+            "workflow_tools": workflow_tools,
         }
     resolved_cli = shutil.which(executable)
     candidates = [
@@ -165,9 +256,12 @@ def doctor(
         "render_tested_runtime": version in set(RENDER_TESTED_DARKTABLE),
         "ai_support": ai_support,
         "native_subject_mask": native_mask,
+        "workflow_tools": workflow_tools,
         "notes": [
             "Run a fresh-config render for every final XMP.",
             "AI object segmentation requires reviewed foreground/background prompts.",
+            "Workflow tools are recommendations for analysis and review artifacts; "
+            "their absence does not disable core XMP construction.",
         ],
     }
 

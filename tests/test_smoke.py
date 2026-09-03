@@ -10,10 +10,24 @@ from pathlib import Path
 from PIL import Image
 
 from photo_xmp import xmp
-from photo_xmp.cli import capabilities, inspect_xmp, validate_xmp
+from photo_xmp.cli import capabilities, companion_tool_status, inspect_xmp, validate_xmp
 
 
 class PhotoXmpSmokeTests(unittest.TestCase):
+    def test_companion_tool_status_has_stable_machine_readable_shape(self) -> None:
+        result = companion_tool_status()
+        self.assertEqual(
+            set(result),
+            {
+                "uv", "exiftool", "imagemagick", "fontconfig",
+                "gmic", "cjk_font", "imagemagick_font_registry",
+            },
+        )
+        for name in ("uv", "exiftool", "imagemagick", "fontconfig", "gmic"):
+            self.assertIn("available", result[name])
+            self.assertFalse(result[name]["required_for_cli"])
+        self.assertIn("font_count", result["imagemagick_font_registry"])
+
     def test_packer_self_test(self) -> None:
         xmp._self_test()
 

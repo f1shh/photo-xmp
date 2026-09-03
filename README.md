@@ -26,21 +26,45 @@ Run `photo-xmp capabilities` for the machine-readable current surface and
 
 ## Requirements
 
-- Python 3.10 or later
-- darktable and `darktable-cli` for rendering
-- NumPy and Pillow (installed with the package)
+- Python 3.10 or later; NumPy and Pillow are installed with the package.
+- darktable and `darktable-cli` for runtime-derived defaults, validation, and
+  rendering. The currently render-tested releases are reported by
+  `photo-xmp doctor`; a different release requires a module-level smoke render,
+  not an automatic rejection.
 
 The native subject-mask command additionally requires a darktable build with AI
 support enabled, an active installed mask model, `libdarktable`, and a C compiler.
 It intentionally follows the user's darktable installation and does not download
 or bundle a model. `photo-xmp doctor` reports availability and reasons.
 
+The CLI does not require ExifTool or ImageMagick to construct XMP, but complete
+agent photo workflows commonly use these companion tools:
+
+- `uv` to run isolated skill helpers;
+- ExifTool for metadata, orientation, and provenance inspection;
+- ImageMagick for contact sheets, overlays, and auxiliary image inspection;
+- Fontconfig plus a Unicode/CJK font when annotations contain Chinese text;
+- G'MIC only when an external operation explicitly calls for it.
+
+`photo-xmp doctor` reports these under `workflow_tools` without treating their
+absence as a core CLI failure. See
+[docs/system-dependencies.md](docs/system-dependencies.md) for installation and
+the common ImageMagick empty-font-registry fix.
+
 ## Install
+
+Install globally with `uv`:
+
+```bash
+uv tool install git+https://github.com/f1shh/photo-xmp.git
+photo-xmp doctor
+photo-xmp capabilities
+```
 
 From a checkout:
 
 ```bash
-python3 -m pip install .
+uv tool install --editable .
 photo-xmp doctor
 photo-xmp capabilities
 ```
