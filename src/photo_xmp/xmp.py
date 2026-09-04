@@ -16,7 +16,10 @@ from __future__ import annotations
 import argparse
 import html
 import math
+import os
+import platform
 import re
+import shutil
 import sqlite3
 import struct
 import subprocess
@@ -161,14 +164,53 @@ def _require_length(blob: bytes | bytearray, expected: int, label: str) -> bytes
 
 def detect_darktable_version(executable: str = "darktable-cli") -> str:
     """Return the installed semantic version reported by darktable-cli."""
+    resolved = resolve_darktable_executable(executable)
     completed = subprocess.run(
-        [executable, "--version"], check=True, text=True, capture_output=True
+        [str(resolved), "--version"], check=True, text=True, capture_output=True
     )
     output = completed.stdout + completed.stderr
     match = re.search(r"(?<![\d.])(\d+\.\d+\.\d+)(?![\d.])", output)
     if not match:
         raise RuntimeError(f"could not parse darktable version from: {output.strip()}")
     return match.group(1)
+
+
+def resolve_darktable_executable(executable: str = "darktable-cli") -> Path:
+    """Resolve darktable-cli, including the official Windows App Paths entry."""
+    candidate = Path(executable).expanduser()
+    if candidate.is_file():
+        return candidate.resolve()
+    found = shutil.which(executable)
+    if found is not None:
+        return Path(found).resolve()
+    if platform.system() == "Windows":
+        names = [Path(executable).name]
+        if not names[0].lower().endswith(".exe"):
+            names.append(names[0] + ".exe")
+        try:
+            import winreg
+        except ImportError:
+            winreg = None
+        if winreg is not None:
+            for name in names:
+                key_name = rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{name}"
+                for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                    try:
+                        with winreg.OpenKey(hive, key_name) as key:
+                            registered = Path(winreg.QueryValue(key, None))
+                    except OSError:
+                        continue
+                    if registered.is_file():
+                        return registered.resolve()
+        for variable in ("ProgramFiles", "ProgramW6432", "LOCALAPPDATA"):
+            base = os.environ.get(variable)
+            if not base:
+                continue
+            for name in names:
+                installed = Path(base) / "darktable" / "bin" / name
+                if installed.is_file():
+                    return installed.resolve()
+    raise FileNotFoundError(f"darktable executable not found: {executable}")
 
 
 def check_darktable_version(

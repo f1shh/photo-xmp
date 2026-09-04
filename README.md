@@ -33,9 +33,11 @@ Run `photo-xmp capabilities` for the machine-readable current surface and
   not an automatic rejection.
 
 The native subject-mask command additionally requires a darktable build with AI
-support enabled, an active installed mask model, `libdarktable`, and a C compiler.
-It intentionally follows the user's darktable installation and does not download
-or bundle a model. `photo-xmp doctor` reports availability and reasons.
+support enabled (darktable 5.6.0 or later), an active installed mask model,
+`libdarktable`, GLib, and a compatible C toolchain. It intentionally follows the
+user's darktable installation and does not download or bundle a model.
+`photo-xmp doctor --require-native-ai` compiles and actually starts the helper;
+finding a library or producing an executable is not considered sufficient.
 
 The CLI does not require ExifTool or ImageMagick to construct XMP, but complete
 agent photo workflows commonly use these companion tools:
@@ -49,7 +51,7 @@ agent photo workflows commonly use these companion tools:
 `photo-xmp doctor` reports these under `workflow_tools` without treating their
 absence as a core CLI failure. See
 [docs/system-dependencies.md](docs/system-dependencies.md) for installation and
-the common ImageMagick empty-font-registry fix.
+the Linux AppImage, Windows DLL, and common ImageMagick font-registry fixes.
 
 ## Install
 
@@ -59,6 +61,15 @@ Install globally with `uv`:
 uv tool install git+https://github.com/f1shh/photo-xmp.git
 photo-xmp doctor
 photo-xmp capabilities
+```
+
+Use strict capability requirements in automation instead of interpreting the
+top-level status loosely:
+
+```bash
+photo-xmp doctor --require-render
+photo-xmp doctor --require-native-ai
+photo-xmp doctor --strict  # both requirements
 ```
 
 From a checkout:

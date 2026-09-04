@@ -33,6 +33,7 @@ from .xmp import (
     pack_mask_group_v6, pack_path_mask_v6, pack_perspective_v5,
     pack_ellipse_mask_v6, pack_rgb_curve_v1, pack_tone_equalizer_v2,
     pack_white_balance_v4, read_xmp, relative_white_balance_coefficients,
+    resolve_darktable_executable,
     repack_color_calibration_v3, repack_denoise_profile_v12,
     tone_equalizer_bands, unpack_basic_adjustments_v2,
     unpack_color_balance_rgb_v5, unpack_color_calibration_v3,
@@ -193,26 +194,40 @@ def companion_tool_status() -> dict[str, object]:
 
 
 def doctor(
-    executable: str = "darktable-cli", config_dir: Path | None = None
+    executable: str = "darktable-cli", config_dir: Path | None = None,
+    *, require_render: bool = False, require_native_ai: bool = False,
 ) -> dict[str, object]:
     workflow_tools = companion_tool_status()
     try:
-        version = check_darktable_version(executable)
+        resolved_executable = resolve_darktable_executable(executable)
+        version = check_darktable_version(str(resolved_executable))
         completed = subprocess.run(
-            [executable, "--version"], text=True, capture_output=True, check=True
+            [str(resolved_executable), "--version"], text=True, capture_output=True, check=True
         )
         output = completed.stdout + completed.stderr
     except (OSError, subprocess.CalledProcessError, RuntimeError) as exc:
+        unmet = ["darktable runtime is unavailable"]
         return {
             "status": "failed", "darktable_cli": executable,
+            "core_status": "unavailable",
+            "render_status": "unavailable",
+            "native_ai_status": "unavailable",
+            "workflow_tools_status": "partial",
             "error": str(exc),
             "workflow_tools": workflow_tools,
+            "requirements": {
+                "require_render": require_render,
+                "require_native_ai": require_native_ai,
+                "met": False,
+                "unmet": unmet,
+            },
         }
-    resolved_cli = shutil.which(executable)
-    candidates = [
-        Path("/Applications/darktable.app/Contents/MacOS/darktable"),
-        *( [Path(resolved_cli)] if resolved_cli else [] ),
-    ]
+    resolved_cli = str(resolved_executable)
+    candidates = [Path(resolved_cli)]
+    if sys.platform == "darwin":
+        candidates.insert(0, Path("/Applications/darktable.app/Contents/MacOS/darktable"))
+    elif sys.platform == "win32":
+        candidates.insert(0, Path(resolved_cli).with_name("darktable.exe"))
     full_output = output
     for candidate in candidates:
         if not candidate.is_file():
@@ -235,7 +250,7 @@ def doctor(
         ai_support = False
     command = [
         sys.executable, "-m", "photo_xmp.subject_mask", "--doctor",
-        "--darktable-cli", executable,
+        "--darktable-cli", str(resolved_executable),
     ]
     if config_dir is not None:
         command.extend(["--config-dir", str(config_dir)])
@@ -250,13 +265,37 @@ def doctor(
                 or "native mask doctor failed"
             ],
         }
+    render_tested = version in set(RENDER_TESTED_DARKTABLE)
+    native_available = bool(native_mask.get("available"))
+    workflow_values = [
+        value for value in workflow_tools.values() if isinstance(value, dict)
+    ]
+    workflow_ok = all(bool(value.get("available")) for value in workflow_values)
+    unmet: list[str] = []
+    if require_render and not render_tested:
+        unmet.append("render runtime is not in the tested darktable set")
+    if require_native_ai and not native_available:
+        unmet.append("native AI subject masking is unavailable")
+    status = "ok" if render_tested and native_available else "degraded"
+    if unmet:
+        status = "failed"
     return {
-        "status": "ok", "darktable_cli": executable,
+        "status": status, "darktable_cli": str(resolved_executable),
+        "core_status": "ok",
+        "render_status": "ok" if render_tested else "untested",
+        "native_ai_status": "ok" if native_available else "unavailable",
+        "workflow_tools_status": "ok" if workflow_ok else "partial",
         "darktable_version": version,
-        "render_tested_runtime": version in set(RENDER_TESTED_DARKTABLE),
+        "render_tested_runtime": render_tested,
         "ai_support": ai_support,
         "native_subject_mask": native_mask,
         "workflow_tools": workflow_tools,
+        "requirements": {
+            "require_render": require_render,
+            "require_native_ai": require_native_ai,
+            "met": not unmet,
+            "unmet": unmet,
+        },
         "notes": [
             "Run a fresh-config render for every final XMP.",
             "AI object segmentation requires reviewed foreground/background prompts.",
@@ -1140,8 +1179,9 @@ def render(
         prefix="photo-xmp-darktable-"
     ) if fresh_config else None
     active_config = Path(temporary_config.name) if temporary_config else config_dir
+    resolved_executable = resolve_darktable_executable(executable)
     command = [
-        executable, str(source), str(xmp), str(temporary), "--width", str(width),
+        str(resolved_executable), str(source), str(xmp), str(temporary), "--width", str(width),
         "--height", str(height), "--hq", "true" if hq else "false", "--core",
     ]
     if active_config is not None:
@@ -2052,6 +2092,18 @@ def main() -> int:
     doctor_parser = sub.add_parser("doctor", help="check darktable runtime, AI model, and native mask support")
     doctor_parser.add_argument("--darktable-cli", default="darktable-cli")
     doctor_parser.add_argument("--config-dir", type=Path)
+    doctor_parser.add_argument(
+        "--require-render", action="store_true",
+        help="exit nonzero unless the installed darktable is in the render-tested set",
+    )
+    doctor_parser.add_argument(
+        "--require-native-ai", action="store_true",
+        help="compile and load-test the native helper; exit nonzero unless AI masking is ready",
+    )
+    doctor_parser.add_argument(
+        "--strict", action="store_true",
+        help="equivalent to --require-render --require-native-ai",
+    )
     sub.add_parser("capabilities", help="print the complete machine-readable capability map")
     edit_parser = sub.add_parser("edit", help="add or replace one module using direct CLI parameters")
     edit_sub = edit_parser.add_subparsers(dest="edit_command", required=True)
@@ -2127,7 +2179,11 @@ def main() -> int:
     args = parser.parse_args()
     try:
         if args.command == "doctor":
-            result = doctor(args.darktable_cli, args.config_dir)
+            result = doctor(
+                args.darktable_cli, args.config_dir,
+                require_render=args.require_render or args.strict,
+                require_native_ai=args.require_native_ai or args.strict,
+            )
         elif args.command == "capabilities":
             result = capabilities()
         elif args.command == "edit":

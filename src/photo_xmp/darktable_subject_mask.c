@@ -114,6 +114,12 @@ static void add_prompt(arguments_t *args, const float x, const float y, const in
 
 static arguments_t parse_args(int argc, char **argv)
 {
+  if(argc == 2 && (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h")))
+  {
+    puts("darktable-subject-mask native helper");
+    puts("loader smoke: ok");
+    exit(0);
+  }
   arguments_t args = { 0 };
   args.passes = 3;
   args.threshold = 0.5f;
